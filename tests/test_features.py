@@ -90,3 +90,29 @@ def test_max_runs():
     f = featurize("KKKAAAAAAKK")
     assert f[INDEX["max_hydrophobic_run"]] == 6.0  # the AAAAAA stretch
     assert f[INDEX["max_cationic_run"]] == 3.0     # leading KKK
+
+
+def test_rank_normalise_shares_ranks_among_ties():
+    """Equal values must receive equal scores, independent of input order."""
+    from amp_challenge_2027.scoring import _rank_normalise
+
+    assert np.allclose(_rank_normalise(np.array([1.0, 1.0, 1.0]), True), [0.5, 0.5, 0.5])
+    # Two distinct values, two ties each: ranks 0,1 -> 0.5 and 2,3 -> 2.5, /3.
+    got = _rank_normalise(np.array([5.0, 1.0, 5.0, 1.0]), True)
+    assert np.allclose(got, [2.5 / 3, 0.5 / 3, 2.5 / 3, 0.5 / 3])
+    # Permuting the input permutes the output identically -- no positional bias.
+    a = _rank_normalise(np.array([1.0, 1.0, 2.0]), True)
+    b = _rank_normalise(np.array([2.0, 1.0, 1.0]), True)
+    assert np.allclose(np.sort(a), np.sort(b))
+    assert a[2] == b[0]  # the value 2.0 scores the same wherever it sits
+
+
+def test_rank_normalise_direction_and_bounds():
+    from amp_challenge_2027.scoring import _rank_normalise
+
+    asc = _rank_normalise(np.array([1.0, 2.0, 3.0]), True)
+    desc = _rank_normalise(np.array([1.0, 2.0, 3.0]), False)
+    assert np.allclose(asc, [0.0, 0.5, 1.0])
+    assert np.allclose(desc, [1.0, 0.5, 0.0])
+    assert _rank_normalise(np.array([]), True).shape == (0,)
+    assert np.allclose(_rank_normalise(np.array([7.0]), True), [1.0])

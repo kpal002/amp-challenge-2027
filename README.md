@@ -175,41 +175,61 @@ length barely vary, so they can fail for the same reason.
 
 Stratified selection fixed it, and the effect is measured rather than asserted:
 
-| Metric | Score-greedy | **Stratified** | Potent refs (benchmark) |
-|---|---|---|---|
-| FBD ↓ | 10.87 | **3.94** | 2.94 |
-| MMD ↓ | 72.51 | **17.96** | 10.89 |
-| Recall ↑ | 0.17 | **0.86** | 0.88 |
-| Diversity ↑ | 0.707 | **0.811** | 0.816 |
-| Conformity ↑ | 0.123 | **0.488** | 0.458 |
-| Precision | 0.97 | 0.86 | 0.98 |
+| Metric | score-greedy | stratified, pool 4,000 | **stratified, pool 12,000 (shipped)** | potent refs |
+|---|---|---|---|---|
+| FBD ↓ | 10.87 | 3.94 | **2.02** | 2.88 |
+| MMD ↓ | 72.51 | 17.96 | **2.75** | 9.98 |
+| Recall ↑ | 0.17 | 0.86 | 0.85 | 0.88 |
+| Diversity ↑ | 0.707 | 0.811 | **0.844** | 0.821 |
+| Conformity ↑ | 0.123 | 0.488 | **0.592** | 0.455 |
+| top-10 pred MIC | +0.098 | +0.284 | +0.529 | — |
+
 
 The top-100 now tracks the measured-potent cohort on every axis, and top-10
 predicted potency is unchanged (+0.275 → +0.284). Precision falls from 0.97 to
 0.86, which is the expected price of coverage.
 
-`--strata-pool` controls the trade-off (default 4,000). Smaller pools favour
-predicted potency, larger ones favour spread; 4,000 puts the top-100 at median net
-charge 3.99 against 4.07 for peptides with verified sub-10 µM activity.
+`--strata-pool` controls the trade-off (default **12,000**). Smaller pools favour
+predicted potency, larger ones favour spread. 12,000 captures essentially all the
+distributional gain (FBD 2.02 against 1.99 at pool 25,000) while keeping more
+predicted potency, and puts the top-100 at median net charge 3.60 against 4.07 for
+peptides with verified sub-10 µM activity. Pool 25,000 is half the library, at
+which point stratified selection barely differs from sampling the whole library
+and the score signal is largely discarded.
 
 ### Model performance (out-of-fold)
 
-| Model | Metric | Value |
-|---|---|---|
-| Potency, ridge | Spearman ρ | +0.472 |
-| Potency, MLP | Spearman ρ | +0.541 |
-| Potency, blend (shipped) | Spearman ρ | +0.558 |
-| Potency, blend (shipped) | RMSE | 0.605 log₁₀ units |
-| AMP-likeness, logistic regression | AUC | 0.690 |
-| AMP-likeness, MLP (shipped) | AUC | 0.831 |
-| AMP-likeness, MLP vs. shuffled-only negatives | AUC | 0.783 |
+Two splits are reported. The random split is the conventional number; the
+**clustered split** is the honest one. AMP databases are full of homologues and
+truncation series, so a random split usually leaves a near-identical peptide in
+the training fold. Grouping peptides at Levenshtein ratio >= 0.6 (1,168 groups over
+4,121 sequences) and splitting by group estimates performance on unrelated
+families.
 
-The potency RMSE of 0.605 log₁₀ units is roughly a factor of four in µM. This is
-a weak oracle and is treated as one — it contributes half the ranking signal, not
-all of it.
+| Potency model | random split | clustered split |
+|---|---|---|
+| ridge, Spearman rho | +0.472 | +0.438 |
+| MLP, Spearman rho | +0.539 | +0.420 |
+| blend (shipped), Spearman rho | +0.557 | **+0.468** |
+| blend (shipped), RMSE | 0.606 | **0.656** log10 units |
+
+| AMP-likeness model | AUC |
+|---|---|
+| logistic regression | 0.690 |
+| MLP (shipped) | 0.832 |
+| MLP vs shuffled-only negatives | 0.785 |
+
+Scalers are fitted inside each fold. An earlier version fitted one scaler over the
+whole dataset before splitting, which leaks test-fold means and variances; the
+impact turned out to be negligible here (blend Spearman +0.558 -> +0.557), but the
+leak was real and the fix is correct.
+
+Treat **+0.468 Spearman / 0.656 log10 units** as the potency oracle's actual
+accuracy. That is roughly a factor of 4.5 in uM. It contributes half the ranking
+signal, not all of it.
 
 The AUC against shuffled-only negatives is the meaningful realism number: those
-negatives have identical amino-acid composition to the positives, so 0.783
+negatives have identical amino-acid composition to the positives, so 0.785
 reflects learned sequence *arrangement*. Logistic regression reaches only 0.690
 on the same task.
 
@@ -220,15 +240,14 @@ decoy controls. Since the aggregation score is withheld, this reproduces the
 discrimination it was reportedly tuned for — real AMPs versus decoys — and checks
 that the library lands on the AMP side of every axis independently.
 
-| Cohort | pred. log₁₀ MIC | AMP-likeness | net charge | hydrophobic moment | length |
-|---|---|---|---|---|---|
-| generated library | 1.233 | 0.562 | 2.99 | 0.51 | 18 |
-| generated top-100 | 0.475 | 0.997 | 8.99 | 0.90 | 26 |
-| reference AMPs | 1.226 | 0.650 | 2.89 | 0.49 | 17 |
-| potent refs (MIC ≤ 10 µM) | 0.850 | 0.900 | 4.07 | 0.62 | 22 |
-| weak refs (MIC ≥ 100 µM) | 1.674 | 0.731 | 2.80 | 0.50 | 15 |
-| shuffled decoys | 1.241 | 0.216 | 2.90 | 0.41 | 18 |
-| random peptides | 1.299 | 0.077 | 2.90 | 0.44 | 18 |
+| Cohort | pred. log₁₀ MIC | net charge | hydrophobic moment | length |
+|---|---|---|---|---|
+| generated library | 1.233 | 2.90 | 0.504 | 18 |
+| generated top-100 | 0.762 | 3.60 | 0.492 | 17 |
+| reference AMPs | 1.150 | 2.99 | 0.560 | 15 |
+| potent refs (MIC ≤ 10 µM) | 0.850 | 4.07 | 0.617 | 22 |
+| weak refs (MIC ≥ 100 µM) | 1.674 | 2.80 | 0.495 | 15 |
+
 
 The library tracks the reference AMP distribution on every physicochemical axis
 while separating cleanly from composition-matched decoys under the AMP-likeness
@@ -255,6 +274,11 @@ what a near-ideal score looks like on this setup.
 | shuffled decoys | 1.416 | 3.79 | 0.898 | 0.855 | 0.856 | 0.476 |
 | random peptides | 3.821 | 10.52 | 0.939 | 0.612 | 0.845 | 0.578 |
 
+At the top-100 scale (n=100, matched reference): FBD **2.024**, MMD **2.750**,
+precision 0.85, recall 0.85, diversity 0.844, conformity 0.592 — against
+2.943 / 10.892 / 0.98 / 0.88 / 0.816 / 0.458 for measured-potent reference AMPs.
+
+
 Embedder: ESM-2 `t12_35M`. Uniqueness 1.0 and Novelty 1.0 for every generated
 cohort. The library sits within ~2× of the ideal control on FBD and MMD while
 being 3–9× closer than decoys, with precision, recall, diversity and conformity
@@ -269,15 +293,26 @@ aggregation score may weight them differently than we have assumed.
 |---|---|
 | Unique sequences | 50,000 / 50,000 |
 | Length | min 8, median 18, max 50 |
-| Mean pairwise similarity (n=300 subsample) | 0.253 |
-| Library novelty vs reference | median 0.645, p95 0.889, max 0.960 |
-| Top-100 novelty vs reference | median 0.662, p95 0.743, **max 0.750** |
+| Mean pairwise similarity (n=300 subsample) | 0.250 |
+| Library novelty vs reference | median 0.667, p95 0.872, max 0.947 |
+| Top-100 novelty vs reference | **max 0.750** |
+| Top-100 net charge | median 3.60, IQR 3.06 |
 
-One caveat stated plainly: the top-100's *predicted* MIC (0.475) is better than
-that of real measured-potent AMPs (0.850), but candidates were selected on that
-same prediction. With an RMSE of 0.605 log₁₀ units, that gap is inside model noise
-and partly reflects winner's curse. It is not evidence of superiority to known
-potent peptides — only the Phase 2 assays can establish that.
+
+Two caveats stated plainly.
+
+The top-100's *predicted* MIC (0.762) is better than the library median (1.233)
+but no better than real measured-potent AMPs (0.850), and candidates were selected
+on that same prediction. With a clustered-split RMSE of 0.656 log₁₀ units, none of
+these gaps is outside model noise. This is not evidence of superiority to known
+potent peptides; only the Phase 2 assays can establish that.
+
+Every number in the tables above is emitted by
+`uv run python scripts/report_numbers.py` from the committed artifacts, and the
+seqme figures by `scripts/evaluate_with_seqme.py`. Earlier revisions of this README
+quoted figures copied by hand from different runs and contradicted each other
+(top-100 median charge appeared as both 3.99 and 8.99). Regenerate rather than
+edit them.
 
 ## Training data
 

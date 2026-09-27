@@ -145,7 +145,7 @@ def select_top(
     in_envelope: np.ndarray | None = None,
     strata_features: np.ndarray | None = None,
     strata_bins: int = 4,
-    strata_pool: int = 4000,
+    strata_pool: int = 12000,
     max_internal_similarity: float = 0.80,
     verbose: bool = True,
 ) -> list[str]:
@@ -307,7 +307,7 @@ def main() -> None:
     parser.add_argument(
         "--strata-pool",
         type=int,
-        default=4000,
+        default=12000,
         help="Stratify within this many top-scoring candidates.",
     )
     parser.add_argument("--quiet", action="store_true")

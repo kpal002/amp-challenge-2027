@@ -32,9 +32,14 @@ sampling (top_p 0.95) with temperatures cycled over {0.85, 0.95, 1.00, 1.05,
 1.15} across batches.
 
 Candidate ranking combines three rank-normalised terms: predicted potency from a
-log₁₀ MIC regressor (out-of-fold Spearman ρ 0.558, RMSE 0.605 log₁₀ units), an
-AMP-likeness classifier trained against composition-matched shuffles (out-of-fold
-AUC 0.783 on that order-only task), and a hemolysis-informed selectivity proxy.
+log₁₀ MIC regressor, an AMP-likeness classifier trained against
+composition-matched shuffles (out-of-fold AUC 0.785 on that order-only task), and
+a hemolysis-informed selectivity proxy. The potency model reaches out-of-fold
+Spearman ρ 0.557 on a random split but **ρ 0.468 / RMSE 0.656 log₁₀ units** when
+peptides are clustered by sequence similarity (Levenshtein ≥ 0.6, 1,168 groups)
+and split by group. We quote the clustered figure as the oracle's real accuracy:
+AMP databases are dense with homologues, so a random split leaves near-identical
+peptides in the training fold.
 Because the aggregation score is withheld until Phase 1 closes, we did not tune
 against a ranking function; we optimised for robustness across the published
 metric families independently.
@@ -55,13 +60,14 @@ Four filters are applied on top of the composite score.
    hemolytic.
 3. **Stratified selection.** Candidates are binned into 64 strata (quartiles over
    length, net charge and hydrophobic moment, library-wide edges) and the best
-   admissible candidate from each is taken in turn from the top 4,000 by score,
+   admissible candidate from each is taken in turn from the top 12,000 by score,
    then re-sorted into rank order. Measured with seqme, score-greedy selection
    inside the envelope gave precision 0.97 with recall 0.17 — a homogeneous
    cluster. Since 25 of the 100 are drawn at random for assay, homogeneity makes
-   that draw a correlated bet. Stratifying raised recall to 0.86, diversity to
-   0.811 and conformity to 0.488, matching the measured-potent reference cohort
-   (0.88 / 0.816 / 0.458), with top-10 predicted potency unchanged.
+   that draw a correlated bet. Stratifying moved the top-100 to FBD 2.02, MMD
+   2.75, recall 0.85, diversity 0.844 and conformity 0.592 — better than the
+   measured-potent reference cohort on FBD and MMD (2.94 / 10.89) — at a cost of
+   0.25 log₁₀ units in top-10 predicted potency, inside the oracle's error.
 4. **Internal diversity.** No two candidates exceed 0.80 similarity to each
    other.
 
@@ -89,6 +95,12 @@ Two filters worth flagging:
   database's `anti-gram-` and `anti-gram+` labels are mutually exclusive, so
   "active against both" never fires. MDR is instead peptides assayed against ≥3
   distinct bacteria with median MIC ≤ 10 µM (1,524 sequences).
+- **The category labels are proxies and claim less than their names.** `mdr`
+  encodes cross-species *breadth*; no drug-resistant isolate appears in the
+  training data, so it is not evidence of MDR ESKAPE activity. `therapeutic` is
+  essentially a cysteine-free filter, and no measured HC50 enters the pipeline at
+  any point, so it reflects a structural prior plus a hand-specified selectivity
+  proxy, not demonstrated low hemolysis.
 
 Generated sequences are additionally screened against a 0.90 near-duplicate
 ceiling versus known AMPs (5,276 dropped), since the competition screens for
@@ -129,8 +141,17 @@ held-out control, no overlap. Cohorts size-matched at n=1000.
 | shuffled decoys | 1.416 | 3.79 | 0.898 | 0.855 | 0.476 |
 | random peptides | 3.821 | 10.52 | 0.939 | 0.612 | 0.578 |
 
-Library uniqueness 50,000/50,000; novelty 1.0; mean pairwise similarity 0.253;
-top-100 maximum reference similarity 0.750.
+At the top-100 scale (n=100, size-matched reference): FBD 2.02, MMD 2.75,
+precision 0.85, recall 0.85, diversity 0.844, conformity 0.592, against
+2.94 / 10.89 / 0.98 / 0.88 / 0.816 / 0.458 for measured-potent reference AMPs.
+
+Library uniqueness 50,000/50,000; novelty 1.0; mean pairwise similarity 0.250;
+library novelty vs reference median 0.667 / p95 0.872 / max 0.947; top-100
+maximum reference similarity 0.750; top-100 median net charge 3.60 (IQR 3.06)
+against 4.07 for measured-potent AMPs.
+
+All figures are emitted by `scripts/report_numbers.py` and
+`scripts/evaluate_with_seqme.py` from the committed artifacts.
 
 ### Ablation: a larger model was trained and rejected
 
@@ -150,12 +171,12 @@ while training loss fell to 0.85: the capacity went into reproducing the
 
 ### Honest caveats
 
-- The potency oracle is weak: RMSE 0.605 log₁₀ units is roughly a factor of four
-  in µM. It contributes half the ranking signal, not all of it.
-- The top-100's *predicted* MIC (0.475) is better than that of real
-  measured-potent AMPs (0.850), but candidates were selected on that same
-  prediction. Within the model's noise, this is partly winner's curse and is not
-  evidence of superiority to known potent peptides.
+- The potency oracle is weak: clustered-split RMSE 0.656 log₁₀ units is roughly a
+  factor of 4.5 in µM. It contributes half the ranking signal, not all of it.
+- The top-100's *predicted* MIC (0.762) beats the library median (1.233) but not
+  real measured-potent AMPs (0.850), and candidates were selected on that same
+  prediction. None of these gaps exceeds model noise, so this is not evidence of
+  superiority to known potent peptides.
 - `therapeutic` and `gram_pos` top-100 lists remain more concentrated than
   `broad_spectrum` (FBD 7.33 vs 3.94). We did not ship an unvalidated fix.
 

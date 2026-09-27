@@ -24,7 +24,8 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import KFold
+from sklearn.model_selection import GroupKFold, KFold
+from sklearn.pipeline import make_pipeline
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import spearmanr
@@ -69,15 +70,39 @@ def make_negatives(sequences: list[str], rng: np.random.Generator) -> list[str]:
     return negatives
 
 
+def cluster_groups(sequences: list[str], threshold: float = 0.6) -> np.ndarray:
+    """Greedy single-linkage clustering by Levenshtein ratio.
+
+    A random split over these peptides overstates generalisation: AMP databases
+    are full of homologues and truncation series, so a near-identical sequence
+    usually sits in the training fold. Grouping similar peptides and splitting by
+    group gives a harder, more honest estimate of performance on unrelated
+    families.
+    """
+    import Levenshtein
+
+    groups = np.full(len(sequences), -1, dtype=np.int64)
+    representatives: list[tuple[str, int]] = []
+    order = sorted(range(len(sequences)), key=lambda i: (-len(sequences[i]), sequences[i]))
+    for i in order:
+        seq = sequences[i]
+        for rep, gid in representatives:
+            if Levenshtein.ratio(seq, rep) >= threshold:
+                groups[i] = gid
+                break
+        else:
+            gid = len(representatives)
+            representatives.append((seq, gid))
+            groups[i] = gid
+    return groups
+
+
 def fit_potency(seed: int) -> dict[str, np.ndarray]:
     df = pd.read_csv(DATA / "train_mic.csv")
     sequences = df["sequence"].astype(str).tolist()
     y = df["log10_mic"].to_numpy(dtype=np.float64)
     X = featurize_many(sequences)
     print(f"potency: {X.shape[0]} sequences, {X.shape[1]} features")
-
-    scaler = StandardScaler().fit(X)
-    Xs = scaler.transform(X)
 
     def build_mlp() -> MLPRegressor:
         return MLPRegressor(
@@ -91,21 +116,34 @@ def fit_potency(seed: int) -> dict[str, np.ndarray]:
             random_state=seed,
         )
 
-    # Honest out-of-fold assessment before fitting the shipped model.
-    kf = KFold(n_splits=5, shuffle=True, random_state=seed)
-    oof_mlp = np.zeros_like(y)
-    oof_ridge = np.zeros_like(y)
-    for train_idx, test_idx in kf.split(Xs):
-        oof_mlp[test_idx] = build_mlp().fit(Xs[train_idx], y[train_idx]).predict(Xs[test_idx])
-        oof_ridge[test_idx] = (
-            Ridge(alpha=10.0).fit(Xs[train_idx], y[train_idx]).predict(Xs[test_idx])
-        )
-    blend = 0.5 * (oof_mlp + oof_ridge)
-    for name, pred in (("ridge", oof_ridge), ("mlp", oof_mlp), ("blend", blend)):
-        rho = spearmanr(pred, y).statistic
-        rmse = float(np.sqrt(np.mean((pred - y) ** 2)))
-        print(f"  {name:<6} out-of-fold Spearman {rho:+.3f}  RMSE {rmse:.3f} log10 units")
+    # The scaler is fitted inside each fold, not once over the whole dataset.
+    # Fitting it first leaks the test folds' means and variances into training and
+    # inflates the reported out-of-fold numbers.
+    def evaluate_split(splitter, groups: np.ndarray | None, label: str) -> None:
+        oof_mlp = np.zeros_like(y)
+        oof_ridge = np.zeros_like(y)
+        for train_idx, test_idx in splitter.split(X, y, groups):
+            mlp_pipe = make_pipeline(StandardScaler(), build_mlp())
+            ridge_pipe = make_pipeline(StandardScaler(), Ridge(alpha=10.0))
+            oof_mlp[test_idx] = mlp_pipe.fit(X[train_idx], y[train_idx]).predict(X[test_idx])
+            oof_ridge[test_idx] = ridge_pipe.fit(X[train_idx], y[train_idx]).predict(X[test_idx])
+        blend = 0.5 * (oof_mlp + oof_ridge)
+        print(f"  [{label}]")
+        for name, pred in (("ridge", oof_ridge), ("mlp", oof_mlp), ("blend", blend)):
+            rho = spearmanr(pred, y).statistic
+            rmse = float(np.sqrt(np.mean((pred - y) ** 2)))
+            print(f"    {name:<6} Spearman {rho:+.3f}  RMSE {rmse:.3f} log10 units")
 
+    evaluate_split(KFold(n_splits=5, shuffle=True, random_state=seed), None, "random split")
+
+    groups = cluster_groups(sequences)
+    n_groups = len(set(groups.tolist()))
+    print(f"  similarity clusters (Levenshtein ratio >= 0.6): {n_groups} groups")
+    evaluate_split(GroupKFold(n_splits=5), groups, "clustered split (harder, honest)")
+
+    # Shipped model: scaler fitted on all data, which is correct for the final fit.
+    scaler = StandardScaler().fit(X)
+    Xs = scaler.transform(X)
     mlp = build_mlp().fit(Xs, y)
     ridge = Ridge(alpha=10.0).fit(Xs, y)
 
@@ -137,9 +175,6 @@ def fit_amp_likeness(seed: int) -> dict[str, np.ndarray]:
     y = np.concatenate([np.ones(len(positives)), np.zeros(len(negatives))])
     print(f"amp-likeness: {len(positives)} positives, {len(negatives)} negatives")
 
-    scaler = StandardScaler().fit(X)
-    Xs = scaler.transform(X)
-
     def build_clf() -> MLPClassifier:
         return MLPClassifier(
             hidden_layer_sizes=(128, 64),
@@ -152,16 +187,15 @@ def fit_amp_likeness(seed: int) -> dict[str, np.ndarray]:
             random_state=seed,
         )
 
+    # Scaler fitted per fold to avoid leaking test-fold statistics.
     kf = KFold(n_splits=4, shuffle=True, random_state=seed)
     oof = np.zeros_like(y)
     oof_lr = np.zeros_like(y)
-    for train_idx, test_idx in kf.split(Xs):
-        oof[test_idx] = build_clf().fit(Xs[train_idx], y[train_idx]).predict_proba(Xs[test_idx])[:, 1]
-        oof_lr[test_idx] = (
-            LogisticRegression(max_iter=2000)
-            .fit(Xs[train_idx], y[train_idx])
-            .predict_proba(Xs[test_idx])[:, 1]
-        )
+    for train_idx, test_idx in kf.split(X):
+        clf_pipe = make_pipeline(StandardScaler(), build_clf())
+        lr_pipe = make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000))
+        oof[test_idx] = clf_pipe.fit(X[train_idx], y[train_idx]).predict_proba(X[test_idx])[:, 1]
+        oof_lr[test_idx] = lr_pipe.fit(X[train_idx], y[train_idx]).predict_proba(X[test_idx])[:, 1]
     print(f"  logreg out-of-fold AUC {roc_auc_score(y, oof_lr):.4f}")
     print(f"  mlp    out-of-fold AUC {roc_auc_score(y, oof):.4f}")
 
@@ -175,6 +209,8 @@ def fit_amp_likeness(seed: int) -> dict[str, np.ndarray]:
         f"{roc_auc_score(y[shuffle_mask], oof[shuffle_mask]):.4f}"
     )
 
+    scaler = StandardScaler().fit(X)
+    Xs = scaler.transform(X)
     clf = build_clf().fit(Xs, y)
     out: dict[str, np.ndarray] = {
         "amp_mean": scaler.mean_.astype(np.float32),

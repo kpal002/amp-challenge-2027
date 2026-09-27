@@ -32,6 +32,21 @@ PAD, BOS, EOS = "<pad>", "<bos>", "<eos>"
 
 # Category control tokens. One model serves every competition category; the
 # control token selects the conditional distribution at sampling time.
+#
+# These names match the competition's award categories, but the training labels
+# behind them are PROXIES and claim less than the names suggest:
+#
+#   broad_spectrum  every peptide in the reference database (all antimicrobial)
+#   gram_pos        reference database `anti-gram+` activity annotation
+#   gram_neg        reference database `anti-gram-` activity annotation
+#   mdr             measured against >=3 distinct bacteria with median MIC
+#                   <= 10 uM. This is cross-species BREADTH. It does not require
+#                   drug-resistant isolates, so it is not evidence of activity
+#                   against MDR ESKAPE strains.
+#   therapeutic     cysteine-free reference peptides. There is NO measured HC50
+#                   supervision anywhere in this pipeline, so this is not
+#                   demonstrated selectivity or low hemolysis -- only a structural
+#                   prior plus the hand-specified selectivity proxy in scoring.py.
 CATEGORIES = (
     "broad_spectrum",
     "gram_pos",

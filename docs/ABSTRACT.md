@@ -13,10 +13,14 @@ draw reaches eight residues and forced at fifty — so every sample is compliant
 construction.
 
 Candidate ranking combines three rank-normalised terms: predicted potency from a
-log₁₀ MIC regressor (out-of-fold Spearman ρ = 0.558, RMSE 0.605 log₁₀ units), an
-AMP-likeness classifier trained against composition-matched shuffles
-(out-of-fold AUC 0.783 on that order-only task), and a hemolysis-informed
-selectivity proxy. Because the competition's aggregation score is withheld until
+log₁₀ MIC regressor, an AMP-likeness classifier trained against
+composition-matched shuffles (out-of-fold AUC 0.785 on that order-only task), and
+a hemolysis-informed selectivity proxy. The potency model achieves out-of-fold
+Spearman ρ 0.557 on a random split but only **ρ 0.468, RMSE 0.656 log₁₀ units**
+when peptides are grouped by sequence similarity and split by group — roughly a
+factor of 4.5 in µM. We quote the clustered figure as the oracle's real accuracy,
+since AMP databases are dense with homologues and a random split leaves
+near-identical peptides in the training fold. Because the competition's aggregation score is withheld until
 Phase 1 closes, we did not tune against a ranking function; we instead optimise
 for robustness across the published metric families independently.
 
@@ -39,9 +43,11 @@ nearly identical charge and length, and which can therefore fail for the same
 reason. Since 25 of the 100 are drawn at random for assay, that homogeneity turns
 the draw into a correlated bet. We therefore stratify selection over 64
 physicochemical strata, taking the best admissible candidate from each in turn
-from among the top 4,000 by score. This raises recall to 0.86, diversity to 0.811
-and property conformity to 0.488 — matching the measured-potent reference cohort
-(0.88 / 0.816 / 0.458) — while leaving top-10 predicted potency unchanged.
+from among the top 12,000 by score. This takes the top-100 from FBD 10.87 and
+recall 0.17 under score-greedy selection to **FBD 2.02, MMD 2.75, recall 0.85,
+diversity 0.844 and conformity 0.592** — better than the measured-potent reference
+cohort on FBD and MMD (2.94 / 10.89) and comparable on the rest — at a cost of
+0.25 log₁₀ units in top-10 predicted potency, which is inside the oracle's error.
 
 Two data decisions follow the same logic. The potency model is fitted only on
 *unmodified* GRAMPA measurements, because 43% of that corpus is C-terminally
@@ -52,12 +58,21 @@ distinct species with median MIC ≤ 10 µM — because the reference database's
 Gram-positive and Gram-negative activity labels are mutually exclusive and so
 cannot express cross-spectrum activity.
 
-The generated library matches the reference AMP distribution on net charge (2.99
-vs 2.93), hydrophobic moment (0.51 vs 0.49), hydrophobic fraction (0.46 vs 0.46)
-and length (19 vs 17), while separating cleanly from decoys under the
-AMP-likeness model (0.56 vs 0.22 for shuffles and 0.08 for
-composition-sampled random peptides). All 50,000 sequences are unique, mean
-pairwise similarity is 0.25, and no top-100 candidate exceeds 0.75 similarity to
+The category names match the competition's award categories but the labels behind
+them are proxies and claim less than the names imply. `mdr` encodes cross-species
+**breadth**, not activity against drug-resistant isolates: no resistant strain
+appears in the training data. `therapeutic` is primarily cysteine-free reference
+peptides, and no measured HC50 enters the pipeline at any point, so it reflects a
+structural prior and a hand-specified selectivity proxy rather than demonstrated
+low hemolysis.
+
+The generated library matches the reference AMP distribution on net charge (2.90
+vs 2.99), hydrophobic moment (0.504 vs 0.560) and length (18 vs 15), while
+separating cleanly from decoys under the AMP-likeness model. Independently, under
+seqme against a held-out half of the reference database it reaches FBD 0.432 and
+MMD 0.300, versus 0.227 / 0.126 for real-AMPs-against-real-AMPs and 1.416 / 3.79
+for composition-matched shuffles. All 50,000 sequences are unique, mean
+pairwise similarity is 0.250, and no top-100 candidate exceeds 0.750 similarity to
 any reference AMP — below the required 0.80, since the template implements the
 rule as Levenshtein ratio while the competition proposal specifies MMseqs2
 alignment identity.

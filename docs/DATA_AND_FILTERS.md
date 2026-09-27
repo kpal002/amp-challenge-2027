@@ -48,6 +48,13 @@ Rebuildable with `uv run python training/build_dataset.py`.
 
 - `broad_spectrum` — every peptide in the reference database (all are antimicrobial).
 - `gram_neg` / `gram_pos` — reference database `anti-gram-` / `anti-gram+` activity labels (5,868 / 1,776 sequences).
+**All five category labels are proxies.** They are named after the competition's
+award categories, but the supervision behind them is weaker than the names imply:
+`mdr` encodes cross-species breadth and contains no drug-resistant isolates, so it
+is not evidence of MDR ESKAPE activity; `therapeutic` is essentially a
+cysteine-free filter, and no measured HC50 enters this pipeline anywhere, so it is
+not demonstrated selectivity. Treat both as priors, not as validated activity.
+
 - `mdr` — **derived from measurements, not labels.** The database's `anti-gram-` and `anti-gram+` labels turn out to be mutually exclusive, so "active against both" never fires and cannot define a cross-spectrum category. Instead: peptides assayed against ≥3 distinct bacteria with median MIC ≤ 10 µM (1,524 sequences).
 - `therapeutic` — cysteine-free reference peptides, which cannot form disulfides and are therefore the cleanest examples of the strictly linear, free-terminus peptides this category requires (29,028 sequences).
 
@@ -101,12 +108,13 @@ other while sharing nearly identical charge and length, so they can fail for the
 same reason. Selection is therefore stratified: candidates are binned into 64
 strata (quartiles over length, net charge and hydrophobic moment, with edges taken
 library-wide), and the best admissible candidate from each stratum is taken in
-turn, drawing from the top 4,000 by score. The final list
+turn, drawing from the top 12,000 by score. The final list
 is re-sorted by score so the submitted file remains in rank order.
 
-This raised recall to 0.86, diversity to 0.811 and conformity to 0.488 — all
-close to the measured-potent reference cohort (0.88 / 0.816 / 0.458) — while
-leaving top-10 predicted potency unchanged.
+This took the top-100 from FBD 10.87 / MMD 72.51 / recall 0.17 to **FBD 2.02 /
+MMD 2.75 / recall 0.85 / diversity 0.844 / conformity 0.592**, better than the
+measured-potent reference cohort on FBD and MMD (2.94 / 10.89), at a cost of 0.25
+log₁₀ units in top-10 predicted potency — inside the oracle's error.
 
 ## 4. Manual intervention
 

@@ -70,15 +70,37 @@ class Scorer:
 # published qualitative trend, not a fitted model -- we have no HC50 data locally
 # and deliberately do not pretend to.
 def _rank_normalise(values: np.ndarray, higher_is_better: bool) -> np.ndarray:
-    """Map to [0, 1] by rank. Ties share a rank; deterministic ordering."""
+    """Map to [0, 1] by rank, assigning tied values their average rank.
+
+    Ties must genuinely share a score. An earlier version used a plain stable
+    argsort, which spread equal values across the range by input position -- so
+    three identical predictions became 0, 0.5 and 1.0, and a peptide's composite
+    score depended on where it happened to sit in the library. That is arbitrary
+    and it biases toward whichever tied candidate was generated first.
+    """
     n = len(values)
     if n == 0:
-        return values
+        return values.astype(np.float64)
     if n == 1:
         return np.ones(1)
-    order = np.argsort(values if higher_is_better else -values, kind="stable")
+
+    signed = values if higher_is_better else -values
+    order = np.argsort(signed, kind="stable")
+    ordered = signed[order]
+
+    # Average rank within each run of equal values.
+    ranks_sorted = np.arange(n, dtype=np.float64)
+    # Boundaries of tied groups.
+    new_group = np.empty(n, dtype=bool)
+    new_group[0] = True
+    np.not_equal(ordered[1:], ordered[:-1], out=new_group[1:])
+    group_id = np.cumsum(new_group) - 1
+    group_sum = np.bincount(group_id, weights=ranks_sorted)
+    group_count = np.bincount(group_id)
+    averaged = (group_sum / group_count)[group_id]
+
     ranks = np.empty(n, dtype=np.float64)
-    ranks[order] = np.arange(n, dtype=np.float64)
+    ranks[order] = averaged
     return ranks / (n - 1)
 
 
