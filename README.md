@@ -122,8 +122,10 @@ Three filters apply on top of the score:
 - **Plausibility envelope** — candidates must fall within the central 95% range of
   peptides with *measured* MIC ≤ 10 µM, across ten physicochemical descriptors.
 - **Stratified selection** — the list is built by taking the best candidate from
-  each of 64 physicochemical strata in turn (terciles-of-four over length, net
-  charge and hydrophobic moment), drawing from the top 4,000 candidates by score.
+  each of 64 physicochemical strata in turn (quartiles over length, net charge and
+  hydrophobic moment), drawing from the top 4,000 candidates by score. Bin edges
+  are library-wide: deriving them from the selection pool instead was tried and
+  measured worse on four of five categories.
 
 ### Why the envelope matters
 

@@ -100,8 +100,8 @@ top-100 with precision 0.97 but **recall 0.17** — sequences that differ from e
 other while sharing nearly identical charge and length, so they can fail for the
 same reason. Selection is therefore stratified: candidates are binned into 64
 strata (quartiles over length, net charge and hydrophobic moment, with edges taken
-from the candidate pool's own quantiles), and the best admissible candidate from
-each stratum is taken in turn, drawing from the top 4,000 by score. The final list
+library-wide), and the best admissible candidate from each stratum is taken in
+turn, drawing from the top 4,000 by score. The final list
 is re-sorted by score so the submitted file remains in rank order.
 
 This raised recall to 0.86, diversity to 0.811 and conformity to 0.488 — all

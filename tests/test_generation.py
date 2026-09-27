@@ -162,14 +162,13 @@ def test_stratified_selection_returns_rank_order():
             rng.random(len(sequences)),
         ]
     )
-    strata = stratum_labels(features, n_bins=3)
-
     chosen = select_top(
         sequences,
         scores,
         ReferenceIndex([]),
         k=40,
-        strata=strata,
+        strata_features=features,
+        strata_bins=3,
         strata_pool=300,
         verbose=False,
     )
@@ -203,8 +202,17 @@ def test_stratification_spreads_more_than_greedy():
 
     greedy = select_top(sequences, scores, index, k=60, verbose=False)
     strat = select_top(
-        sequences, scores, index, k=60, strata=strata, strata_pool=400, verbose=False
+        sequences,
+        scores,
+        index,
+        k=60,
+        strata_features=features,
+        strata_bins=3,
+        strata_pool=400,
+        verbose=False,
     )
+    # Coverage is measured against library-wide strata, which is what the
+    # aggregation score's distributional terms compare against.
     greedy_strata = {int(strata[lookup[s]]) for s in greedy}
     strat_strata = {int(strata[lookup[s]]) for s in strat}
     assert len(strat_strata) > len(greedy_strata)
@@ -233,15 +241,14 @@ def test_stratified_selection_fills_k_from_a_tiny_pool():
     features = np.column_stack(
         [np.array([len(s) for s in sequences], dtype=float), rng.random(n), rng.random(n)]
     )
-    strata = stratum_labels(features, n_bins=2)
-
     # Pool smaller than k forces the top-up path.
     chosen = select_top(
         sequences,
         scores,
         ReferenceIndex([]),
         k=50,
-        strata=strata,
+        strata_features=features,
+        strata_bins=2,
         strata_pool=10,
         verbose=False,
     )
