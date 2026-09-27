@@ -51,12 +51,22 @@ def numpy_logits(sampler: PeptideSampler, rows: list[list[int]]) -> np.ndarray:
 
 
 def main() -> None:
-    ckpt = torch.load(CHECKPOINT / "generator.pt", map_location="cpu", weights_only=False)
-    model = PeptideLM(Config())
+    name = sys.argv[1] if len(sys.argv) > 1 else "generator"
+    ckpt = torch.load(CHECKPOINT / f"{name}.pt", map_location="cpu", weights_only=False)
+    saved = ckpt.get("config", {})
+    # Rebuild the exact architecture that was trained rather than the defaults.
+    model = PeptideLM(
+        Config(
+            d_model=saved.get("d_model", 192),
+            n_layers=saved.get("n_layers", 4),
+            n_heads=saved.get("n_heads", 6),
+            d_ff=saved.get("d_ff"),
+        )
+    )
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
 
-    sampler = PeptideSampler(CHECKPOINT / "generator.npz")
+    sampler = PeptideSampler(CHECKPOINT / f"{name}.npz")
 
     peptides = [
         "GIGKFLHSAKKFGKAFVGEIMNS",

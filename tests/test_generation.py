@@ -208,3 +208,45 @@ def test_stratification_spreads_more_than_greedy():
     greedy_strata = {int(strata[lookup[s]]) for s in greedy}
     strat_strata = {int(strata[lookup[s]]) for s in strat}
     assert len(strat_strata) > len(greedy_strata)
+
+
+def test_stratified_selection_fills_k_from_a_tiny_pool():
+    """A tiny strata pool must still yield a full ranked list, not raise.
+
+    Note this asserts the outcome, not the top-up code path specifically: the pool
+    is `max(strata_pool, k)`, so it always holds at least k candidates, and the
+    top-up only runs when admissibility filtering rejects enough of them. That is
+    hard to force with an empty reference set.
+    """
+    from amp_challenge_2027.compliance import ReferenceIndex
+    from amp_challenge_2027.generate import select_top, stratum_labels
+
+    rng = np.random.default_rng(2)
+    sequences = list(
+        dict.fromkeys(
+            "".join(rng.choice(list(AMINO_ACIDS), size=int(rng.integers(8, 51))))
+            for _ in range(400)
+        )
+    )
+    n = len(sequences)
+    scores = rng.random(n)
+    features = np.column_stack(
+        [np.array([len(s) for s in sequences], dtype=float), rng.random(n), rng.random(n)]
+    )
+    strata = stratum_labels(features, n_bins=2)
+
+    # Pool smaller than k forces the top-up path.
+    chosen = select_top(
+        sequences,
+        scores,
+        ReferenceIndex([]),
+        k=50,
+        strata=strata,
+        strata_pool=10,
+        verbose=False,
+    )
+    assert len(chosen) == 50
+    assert len(set(chosen)) == 50
+    lookup = {s: sc for s, sc in zip(sequences, scores)}
+    picked = [lookup[s] for s in chosen]
+    assert all(a >= b - 1e-12 for a, b in zip(picked, picked[1:]))

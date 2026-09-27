@@ -227,6 +227,26 @@ def select_top(
             if not progressed:
                 break
 
+        if len(chosen) < k:
+            # The stratified pool was exhausted. Fall back to score order over the
+            # rest of the library rather than failing: spread is a preference, but
+            # returning a full ranked list is a requirement.
+            already = set(chosen_idx)
+            for i in order:
+                if len(chosen) >= k:
+                    break
+                if i in already:
+                    continue
+                if admissible(i):
+                    chosen.append(sequences[i])
+                    chosen_idx.append(i)
+            if verbose:
+                print(
+                    f"  stratified pool exhausted; topped up to {len(chosen)} "
+                    f"by score order",
+                    flush=True,
+                )
+
     if verbose:
         print(
             f"  top-{k} selection: {rejected_envelope} rejected outside the potent "

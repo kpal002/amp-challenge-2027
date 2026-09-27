@@ -44,13 +44,21 @@ CHECKPOINT = ROOT / "checkpoint"
 
 
 class Config:
-    d_model = 192
-    n_layers = 4
-    n_heads = 6
-    d_ff = 768
-    block_size = BLOCK_SIZE
-    vocab_size = VOCAB_SIZE
-    dropout = 0.1
+    def __init__(
+        self,
+        d_model: int = 192,
+        n_layers: int = 4,
+        n_heads: int = 6,
+        d_ff: int | None = None,
+        dropout: float = 0.1,
+    ) -> None:
+        self.d_model = d_model
+        self.n_layers = n_layers
+        self.n_heads = n_heads
+        self.d_ff = d_ff if d_ff is not None else 4 * d_model
+        self.dropout = dropout
+        self.block_size = BLOCK_SIZE
+        self.vocab_size = VOCAB_SIZE
 
 
 class Block(nn.Module):
@@ -163,6 +171,10 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--val-frac", type=float, default=0.05)
     ap.add_argument("--device", default=None)
+    ap.add_argument("--d-model", type=int, default=192)
+    ap.add_argument("--n-layers", type=int, default=4)
+    ap.add_argument("--n-heads", type=int, default=6)
+    ap.add_argument("--name", default="generator", help="checkpoint basename")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -185,7 +197,7 @@ def main() -> None:
     train, val = data[~is_val], data[is_val]
     print(f"train rows {len(train)} | val rows {len(val)} | held-out peptides {len(held)}")
 
-    cfg = Config()
+    cfg = Config(d_model=args.d_model, n_layers=args.n_layers, n_heads=args.n_heads)
     model = PeptideLM(cfg).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"parameters: {n_params/1e6:.2f}M")
@@ -215,6 +227,9 @@ def main() -> None:
         return losses / max(n, 1)
 
     t0 = time.time()
+    best_val = float("inf")
+    best_state: dict | None = None
+    best_epoch = 0
     for epoch in range(1, args.epochs + 1):
         perm = torch.randperm(len(train), generator=torch.Generator().manual_seed(args.seed + epoch))
         running = 0.0
@@ -233,15 +248,30 @@ def main() -> None:
             sched.step()
             running += loss.item()
         vl = evaluate(val)
+        marker = ""
+        if vl < best_val:
+            # Keep the best-validation weights, not the last epoch's. Validation
+            # loss bottomed out before the final epoch on the first run, so the
+            # shipped checkpoint was very slightly past the optimum.
+            best_val, best_epoch = vl, epoch
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            marker = "  *best"
         print(
             f"epoch {epoch:2d}  train {running/steps_per_epoch:.4f}  "
-            f"val {vl:.4f}  ppl {math.exp(vl):.2f}  {time.time()-t0:.0f}s"
+            f"val {vl:.4f}  ppl {math.exp(vl):.2f}  {time.time()-t0:.0f}s{marker}"
         )
 
-    config = {k: v for k, v in Config.__dict__.items() if not k.startswith("_")}
-    torch.save({"state_dict": model.state_dict(), "config": config}, CHECKPOINT / "generator.pt")
-    export_npz(model, CHECKPOINT / "generator.npz")
-    print(f"\nwrote {CHECKPOINT/'generator.npz'}")
+    if best_state is not None:
+        model.load_state_dict(best_state)
+        print(f"\nrestored best epoch {best_epoch} (val {best_val:.4f}, ppl {math.exp(best_val):.2f})")
+
+    config = {k: v for k, v in cfg.__dict__.items() if not k.startswith("_")}
+    torch.save(
+        {"state_dict": model.state_dict(), "config": config, "best_epoch": best_epoch},
+        CHECKPOINT / f"{args.name}.pt",
+    )
+    export_npz(model, CHECKPOINT / f"{args.name}.npz")
+    print(f"wrote {CHECKPOINT / (args.name + '.npz')} ({n_params/1e6:.2f}M params)")
 
 
 if __name__ == "__main__":
