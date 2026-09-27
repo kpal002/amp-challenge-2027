@@ -314,6 +314,38 @@ quoted figures copied by hand from different runs and contradicted each other
 (top-100 median charge appeared as both 3.99 and 8.99). Regenerate rather than
 edit them.
 
+## Known limitations
+
+Stated rather than papered over.
+
+**The potency oracle is weak.** Clustered-split Spearman ρ 0.468 / RMSE 0.656 log₁₀
+units is roughly a factor of 4.5 in µM. It carries half the ranking signal.
+
+**Two category labels are proxies.** `mdr` encodes cross-species breadth; no
+drug-resistant isolate appears anywhere in the training data, so it is not evidence
+of MDR ESKAPE activity. `therapeutic` is essentially a cysteine-free filter with no
+measured HC50 supervision at any point, so it is not demonstrated selectivity. The
+names come from the competition's award categories, not from the evidence.
+
+**`gram_neg` selects from a narrower band than the other categories.** Its top-100
+spans 24 of 64 physicochemical strata, against 59–61 for the others, and its length
+IQR is 2.1 against roughly 3 elsewhere. This is the plausibility envelope behaving
+correctly rather than a defect: the `gram_neg` conditional is intrinsically
+low-charge (library p95 net charge 4.04, against 8.99 for broad-spectrum), and the
+envelope floor derived from measured-potent AMPs (net charge ≥ 0, cationic fraction
+≥ 0.053, pI ≥ 7.04) removes the low end, leaving candidates spanning ~4.2 charge
+units instead of ~7.1. Widening the spread would mean selecting outside the region
+where the potency model has evidence, which measured worse. Left as-is.
+
+**No hemolysis data is used anywhere.** The selectivity term is a published
+qualitative trend (cationicity favourable, bulk hydrophobicity and long
+hydrophobic runs unfavourable), not a fitted model. HC50 enters only in Phase 2.
+
+**The aggregation score is unobservable.** Nothing here is tuned to the
+competition metric; the weights were set by reasoning from the published criteria.
+Two changes that seemed well-reasoned measured worse and were reverted — see the
+`stratum_labels` docstring and the generator-size table above.
+
 ## Training data
 
 All data is public. No proprietary or non-public data was used.
