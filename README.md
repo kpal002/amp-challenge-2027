@@ -71,7 +71,25 @@ five categories and the control token selects the conditional distribution at
 sampling time.
 
 Peptides are 8–50 residues over a 20-token vocabulary, so this is the scale the
-data supports; larger models mostly memorise the reference database.
+data supports. That is a measured claim, not an assumption: a 10.69M-parameter
+variant (384-dim, 6 layers) was trained and rejected.
+
+| | 1.8M (shipped) | 10.69M (rejected) | held-out AMPs |
+|---|---|---|---|
+| best validation loss | 1.9393 | **1.8722** | — |
+| train/val gap at best epoch | 0.16 | 0.31 | — |
+| library FBD ↓ | **0.432** | 0.660 | 0.229 |
+| library MMD ↓ | **0.300** | 1.496 | 0.091 |
+| Precision / Recall | **0.919 / 0.899** | 0.912 / 0.880 | 0.945 / 0.942 |
+| near-duplicates dropped | **5,276** | 6,125 | — |
+| generation runtime | **138 s** | 359 s | — |
+
+The larger model wins on validation perplexity and loses on every metric that
+matters. Its validation loss bottomed out at epoch 9 and then rose to 2.48 by
+epoch 26 while training loss fell to 0.85 — the extra capacity went into
+reproducing the 39k-sequence training corpus rather than modelling the
+distribution, which shows up as 16% more near-duplicates and a 5x worse MMD.
+Perplexity is not the objective.
 
 Sampling uses nucleus sampling (`top_p = 0.95`) with temperatures cycled over
 `{0.85, 0.95, 1.00, 1.05, 1.15}` across batches. A single temperature either
