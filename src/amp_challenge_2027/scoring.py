@@ -136,5 +136,8 @@ def composite_score(
         "realism_rank": realism_rank,
         "selectivity_rank": selectivity_rank,
         "in_envelope": scorer.in_envelope(X),
+        # Returned so callers can stratify selection without recomputing features.
+        "features": X,
+        "feature_index": index,
     }
     return score, components

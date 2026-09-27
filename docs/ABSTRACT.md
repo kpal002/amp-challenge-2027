@@ -31,6 +31,18 @@ predicted potency while keeping candidates in the region where the oracle has
 evidence and where embedding-based comparisons to known potent peptides are
 meaningful.
 
+Bounding *where* candidates sit proved insufficient on its own. Evaluated with
+`seqme` — the organizers' own framework, independent of our scorers —
+score-greedy selection inside the envelope still yielded a top-100 with precision
+0.97 and **recall 0.17**: sequences that differ from one another while sharing
+nearly identical charge and length, and which can therefore fail for the same
+reason. Since 25 of the 100 are drawn at random for assay, that homogeneity turns
+the draw into a correlated bet. We therefore stratify selection over 64
+physicochemical strata, taking the best admissible candidate from each in turn
+from among the top 4,000 by score. This raises recall to 0.86, diversity to 0.811
+and property conformity to 0.488 — matching the measured-potent reference cohort
+(0.88 / 0.816 / 0.458) — while leaving top-10 predicted potency unchanged.
+
 Two data decisions follow the same logic. The potency model is fitted only on
 *unmodified* GRAMPA measurements, because 43% of that corpus is C-terminally
 amidated while the competition requires free termini; training on amidated

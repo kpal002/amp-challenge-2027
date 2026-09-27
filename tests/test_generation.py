@@ -137,3 +137,74 @@ def test_fasta_roundtrip_is_byte_stable(tmp_path):
     write_fasta(sequences, b)
     assert a.read_bytes() == b.read_bytes()
     assert read_sequences(a) == sequences
+
+
+def test_stratified_selection_returns_rank_order():
+    """Regression: round-robin selects per stratum, but the file must be ranked.
+
+    An earlier version returned the round-robin order, which is not score order,
+    so `top.fasta` was not a ranked list as the competition requires.
+    """
+    from amp_challenge_2027.compliance import ReferenceIndex
+    from amp_challenge_2027.generate import select_top, stratum_labels
+
+    rng = np.random.default_rng(0)
+    sequences = [
+        "".join(rng.choice(list(AMINO_ACIDS), size=int(rng.integers(8, 51))))
+        for _ in range(600)
+    ]
+    sequences = list(dict.fromkeys(sequences))
+    scores = rng.random(len(sequences))
+    features = np.column_stack(
+        [
+            np.array([len(s) for s in sequences], dtype=float),
+            rng.random(len(sequences)),
+            rng.random(len(sequences)),
+        ]
+    )
+    strata = stratum_labels(features, n_bins=3)
+
+    chosen = select_top(
+        sequences,
+        scores,
+        ReferenceIndex([]),
+        k=40,
+        strata=strata,
+        strata_pool=300,
+        verbose=False,
+    )
+    assert len(chosen) == 40
+    assert len(set(chosen)) == 40
+    lookup = {s: sc for s, sc in zip(sequences, scores)}
+    picked = [lookup[s] for s in chosen]
+    assert all(a >= b - 1e-12 for a, b in zip(picked, picked[1:])), "not in rank order"
+
+
+def test_stratification_spreads_more_than_greedy():
+    """Stratified selection must cover more strata than score-greedy selection."""
+    from amp_challenge_2027.compliance import ReferenceIndex
+    from amp_challenge_2027.generate import select_top, stratum_labels
+
+    rng = np.random.default_rng(1)
+    sequences = list(
+        dict.fromkeys(
+            "".join(rng.choice(list(AMINO_ACIDS), size=int(rng.integers(8, 51))))
+            for _ in range(800)
+        )
+    )
+    n = len(sequences)
+    lengths = np.array([len(s) for s in sequences], dtype=float)
+    # Make score correlate with length so greedy selection concentrates in one bin.
+    scores = lengths / lengths.max() + 0.01 * rng.random(n)
+    features = np.column_stack([lengths, rng.random(n), rng.random(n)])
+    strata = stratum_labels(features, n_bins=3)
+    index = ReferenceIndex([])
+    lookup = {s: i for i, s in enumerate(sequences)}
+
+    greedy = select_top(sequences, scores, index, k=60, verbose=False)
+    strat = select_top(
+        sequences, scores, index, k=60, strata=strata, strata_pool=400, verbose=False
+    )
+    greedy_strata = {int(strata[lookup[s]]) for s in greedy}
+    strat_strata = {int(strata[lookup[s]]) for s in strat}
+    assert len(strat_strata) > len(greedy_strata)

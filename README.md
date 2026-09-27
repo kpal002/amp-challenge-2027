@@ -121,6 +121,9 @@ Three filters apply on top of the score:
   motif.
 - **Plausibility envelope** — candidates must fall within the central 95% range of
   peptides with *measured* MIC ≤ 10 µM, across ten physicochemical descriptors.
+- **Stratified selection** — the list is built by taking the best candidate from
+  each of 64 physicochemical strata in turn (terciles-of-four over length, net
+  charge and hydrophobic moment), drawing from the top 4,000 candidates by score.
 
 ### Why the envelope matters
 
@@ -140,6 +143,34 @@ Giving up a number the oracle could not support is the point, not a regression.
 Library sequences are additionally screened against a 0.90 near-duplicate ceiling
 (5,276 dropped in the shipped run), since the competition screens for "near-exact
 matches" to AMP repositories.
+
+### Why selection is stratified
+
+The envelope bounded *where* the top-100 could sit but not how tightly it
+clustered inside those bounds. Measured with `seqme`, score-greedy selection gave
+the top-100 **precision 0.97 with recall 0.17** — the signature of a narrow,
+homogeneous cluster. Since 25 of the 100 are drawn at random for assay, that
+converts the draw into a correlated bet: the sequences differ, but charge and
+length barely vary, so they can fail for the same reason.
+
+Stratified selection fixed it, and the effect is measured rather than asserted:
+
+| Metric | Score-greedy | **Stratified** | Potent refs (benchmark) |
+|---|---|---|---|
+| FBD ↓ | 10.87 | **3.94** | 2.94 |
+| MMD ↓ | 72.51 | **17.96** | 10.89 |
+| Recall ↑ | 0.17 | **0.86** | 0.88 |
+| Diversity ↑ | 0.707 | **0.811** | 0.816 |
+| Conformity ↑ | 0.123 | **0.488** | 0.458 |
+| Precision | 0.97 | 0.86 | 0.98 |
+
+The top-100 now tracks the measured-potent cohort on every axis, and top-10
+predicted potency is unchanged (+0.275 → +0.284). Precision falls from 0.97 to
+0.86, which is the expected price of coverage.
+
+`--strata-pool` controls the trade-off (default 4,000). Smaller pools favour
+predicted potency, larger ones favour spread; 4,000 puts the top-100 at median net
+charge 3.99 against 4.07 for peptides with verified sub-10 µM activity.
 
 ### Model performance (out-of-fold)
 
@@ -182,6 +213,37 @@ that the library lands on the AMP side of every axis independently.
 The library tracks the reference AMP distribution on every physicochemical axis
 while separating cleanly from composition-matched decoys under the AMP-likeness
 model. Reproduce with `uv run python scripts/analyze_library.py`.
+
+### Independent validation with `seqme`
+
+The cohort table above uses our own scorers, which is circular — the models that
+ranked the candidates also graded them. `seqme` (the framework the organizers
+evaluate with) is independent of this pipeline. Reference database split in half:
+one half defines the target distribution, the other is scored as a control, with
+no sequence in both. Cohorts and reference are size-matched at n=1000, since
+seqme's Precision/Recall require equal sizes.
+
+The **"reference AMPs (held out)"** row is the key control — real AMPs scored
+against *other* real AMPs. FBD and MMD have no absolute scale, so that row is
+what a near-ideal score looks like on this setup.
+
+| Cohort | FBD ↓ | MMD ↓ | Precision | Recall | Diversity | Conformity |
+|---|---|---|---|---|---|---|
+| **generated library** | **0.432** | **0.300** | **0.919** | **0.899** | 0.853 | 0.474 |
+| reference AMPs (held out) — *ideal* | 0.227 | 0.126 | 0.944 | 0.937 | 0.856 | 0.468 |
+| potent refs (MIC ≤ 10 µM) | 1.744 | 10.02 | 0.930 | 0.788 | 0.814 | 0.441 |
+| shuffled decoys | 1.416 | 3.79 | 0.898 | 0.855 | 0.856 | 0.476 |
+| random peptides | 3.821 | 10.52 | 0.939 | 0.612 | 0.845 | 0.578 |
+
+Embedder: ESM-2 `t12_35M`. Uniqueness 1.0 and Novelty 1.0 for every generated
+cohort. The library sits within ~2× of the ideal control on FBD and MMD while
+being 3–9× closer than decoys, with precision, recall, diversity and conformity
+all essentially matching the control.
+
+One tension worth naming: *potent* reference AMPs are themselves far from the
+overall AMP distribution (FBD 1.744). Distance to "all known AMPs" and distance
+to "known potent AMPs" are therefore not the same objective, and the withheld
+aggregation score may weight them differently than we have assumed.
 
 | Property | Value |
 |---|---|

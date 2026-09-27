@@ -115,12 +115,29 @@ def build_library(
     return collected
 
 
+def stratum_labels(features: np.ndarray, n_bins: int = 3) -> np.ndarray:
+    """Assign each candidate to a physicochemical stratum.
+
+    Bins are terciles (by default) of length, net charge and hydrophobic moment,
+    computed from the candidate pool itself, giving `n_bins ** 3` strata. Edges
+    come from the pool's own quantiles, so the labelling is deterministic given
+    the library.
+    """
+    label = np.zeros(features.shape[0], dtype=np.int64)
+    for axis, column in enumerate(features.T):
+        edges = np.quantile(column, np.linspace(0, 1, n_bins + 1)[1:-1])
+        label = label * n_bins + np.searchsorted(edges, column, side="right")
+    return label
+
+
 def select_top(
     sequences: list[str],
     scores: np.ndarray,
     index: ReferenceIndex,
     k: int,
     in_envelope: np.ndarray | None = None,
+    strata: np.ndarray | None = None,
+    strata_pool: int = 4000,
     max_internal_similarity: float = 0.80,
     verbose: bool = True,
 ) -> list[str]:
@@ -137,30 +154,78 @@ def select_top(
       selection into the upper tail of the cationic/amphipathic distribution,
       where the potency model extrapolates and peptides tend to be hemolytic.
       Candidates must lie within the central range of measured-potent AMPs.
+
+    Selection is additionally **stratified** over physicochemical space when
+    `strata` is supplied. Score-greedy selection inside the envelope still
+    collapsed into one narrow corner -- measured with seqme, the top-100 reached
+    precision 0.97 but recall 0.17, the signature of a homogeneous cluster.
+    Because 25 of the 100 are drawn at random for assay, homogeneity converts
+    that draw into a correlated bet even when the sequences differ. Taking the
+    best candidate from each stratum in turn spreads the list across charge,
+    length and amphipathicity while still preferring high scores within each bin.
     """
     # Tie-break on the sequence string so the ordering is total and therefore
     # identical across runs, regardless of how ties fall out of the scorer.
     order = sorted(range(len(sequences)), key=lambda i: (-scores[i], sequences[i]))
 
     chosen: list[str] = []
+    chosen_idx: list[int] = []
     rejected_reference = 0
     rejected_internal = 0
     rejected_envelope = 0
 
-    for i in order:
-        if len(chosen) >= k:
-            break
+    def admissible(i: int) -> bool:
+        nonlocal rejected_envelope, rejected_reference, rejected_internal
         seq = sequences[i]
         if in_envelope is not None and not in_envelope[i]:
             rejected_envelope += 1
-            continue
+            return False
         if index.max_similarity(seq, TOP_SIMILARITY_CEILING) > TOP_SIMILARITY_CEILING:
             rejected_reference += 1
-            continue
+            return False
         if any(Levenshtein.ratio(seq, other) > max_internal_similarity for other in chosen):
             rejected_internal += 1
-            continue
-        chosen.append(seq)
+            return False
+        return True
+
+    if strata is None:
+        for i in order:
+            if len(chosen) >= k:
+                break
+            if admissible(i):
+                chosen.append(sequences[i])
+                chosen_idx.append(i)
+    else:
+        # Stratify *within* the high-scoring region, not across the whole library.
+        # Round-robin over every stratum pulls in the best member of weak strata
+        # too, which costs most of the potency signal; restricting the pool to the
+        # top-scoring candidates first keeps quality and buys spread inside it.
+        pool = order[: max(strata_pool, k)]
+
+        # Round-robin over strata, each holding its candidates in score order.
+        queues: dict[int, list[int]] = {}
+        for i in pool:
+            queues.setdefault(int(strata[i]), []).append(i)
+        stratum_ids = sorted(queues)
+        cursors = {s: 0 for s in stratum_ids}
+
+        while len(chosen) < k:
+            progressed = False
+            for s in stratum_ids:
+                if len(chosen) >= k:
+                    break
+                queue, cursor = queues[s], cursors[s]
+                while cursor < len(queue):
+                    i = queue[cursor]
+                    cursor += 1
+                    if admissible(i):
+                        chosen.append(sequences[i])
+                        chosen_idx.append(i)
+                        progressed = True
+                        break
+                cursors[s] = cursor
+            if not progressed:
+                break
 
     if verbose:
         print(
@@ -174,7 +239,10 @@ def select_top(
             f"only {len(chosen)} of {k} candidates passed the novelty and "
             f"diversity filters; generate a larger library"
         )
-    return chosen
+    # Stratified round-robin selects in stratum order, not score order, but the
+    # submitted top list must be ranked best-first. Re-sort before returning.
+    chosen_idx.sort(key=lambda i: (-scores[i], sequences[i]))
+    return [sequences[i] for i in chosen_idx]
 
 
 def main() -> None:
@@ -199,6 +267,18 @@ def main() -> None:
         type=float,
         default=0.90,
         help="Drop library sequences above this similarity to a known AMP (0 disables).",
+    )
+    parser.add_argument(
+        "--strata-bins",
+        type=int,
+        default=4,
+        help="Bins per axis for stratified top-k selection (1 disables stratification).",
+    )
+    parser.add_argument(
+        "--strata-pool",
+        type=int,
+        default=4000,
+        help="Stratify within this many top-scoring candidates.",
     )
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
@@ -246,12 +326,26 @@ def main() -> None:
         print("scoring library")
     scores, components = composite_score(scorer, library, category)
 
+    # Stratify over length, net charge and amphipathicity so the top list spans
+    # physicochemical space rather than clustering in one corner of it.
+    feature_index = components["feature_index"]
+    strata_columns = [
+        feature_index[name] for name in ("length", "net_charge", "hydrophobic_moment")
+    ]
+    strata = (
+        stratum_labels(components["features"][:, strata_columns], n_bins=args.strata_bins)
+        if args.strata_bins > 1
+        else None
+    )
+
     top = select_top(
         library,
         scores,
         index,
         args.top_k,
         in_envelope=components["in_envelope"],
+        strata=strata,
+        strata_pool=args.strata_pool,
         verbose=verbose,
     )
 
