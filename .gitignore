@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Generated output directories (one per entry point). These are produced by
+# `uv run generate` and must not be committed: the organizers regenerate them.
+/generate/
+/generate_broad_spectrum/
+/generate_gram_pos/
+/generate_gram_neg/
+/generate_mdr/
+/generate_therapeutic/
+
+# Local scratch
+*.log

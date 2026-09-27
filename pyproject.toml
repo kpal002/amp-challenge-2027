@@ -1,0 +1,46 @@
+[project]
+name = "amp-challenge-2027"
+version = "0.1.0"
+description = "Antimicrobial peptide generation for the AMP Challenge 2027 benchmark."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+# Runtime dependencies are deliberately minimal: inference is pure NumPy against
+# committed weights, so `uv sync` stays fast and platform-neutral and generation
+# is deterministic by construction (no GPU/BLAS device divergence).
+dependencies = [
+    "numpy>=2.0",
+    "levenshtein>=0.27",
+]
+
+[project.scripts]
+generate = "amp_challenge_2027.generate:main"
+generate_broad_spectrum = "amp_challenge_2027.generate:main"
+generate_gram_pos = "amp_challenge_2027.generate:main"
+generate_gram_neg = "amp_challenge_2027.generate:main"
+generate_mdr = "amp_challenge_2027.generate:main"
+generate_therapeutic = "amp_challenge_2027.generate:main"
+
+[dependency-groups]
+# Training / analysis only. Not required to reproduce the submitted library.
+#
+# Deliberately NOT named "dev": uv syncs the `dev` group by default, so putting
+# PyTorch there would make the organizers' plain `uv sync` pull ~2 GB of wheels
+# it never needs. Naming it `train` keeps the default install to NumPy and
+# levenshtein.
+train = [
+    "torch>=2.2",
+    "pandas>=2.2",
+    "scikit-learn>=1.5",
+    "biopython>=1.83",
+    "pytest>=9.1.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.21,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
