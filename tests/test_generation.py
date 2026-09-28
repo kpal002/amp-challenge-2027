@@ -167,6 +167,7 @@ def test_stratified_selection_returns_rank_order():
         scores,
         ReferenceIndex([]),
         k=40,
+        max_cysteines=None,
         strata_features=features,
         strata_bins=3,
         strata_pool=300,
@@ -200,12 +201,13 @@ def test_stratification_spreads_more_than_greedy():
     index = ReferenceIndex([])
     lookup = {s: i for i, s in enumerate(sequences)}
 
-    greedy = select_top(sequences, scores, index, k=60, verbose=False)
+    greedy = select_top(sequences, scores, index, k=60, max_cysteines=None, verbose=False)
     strat = select_top(
         sequences,
         scores,
         index,
         k=60,
+        max_cysteines=None,
         strata_features=features,
         strata_bins=3,
         strata_pool=400,
@@ -247,6 +249,7 @@ def test_stratified_selection_fills_k_from_a_tiny_pool():
         scores,
         ReferenceIndex([]),
         k=50,
+        max_cysteines=None,
         strata_features=features,
         strata_bins=2,
         strata_pool=10,
@@ -257,3 +260,37 @@ def test_stratified_selection_fills_k_from_a_tiny_pool():
     lookup = {s: sc for s, sc in zip(sequences, scores)}
     picked = [lookup[s] for s in chosen]
     assert all(a >= b - 1e-12 for a, b in zip(picked, picked[1:]))
+
+
+def test_cysteine_gate_excludes_multi_cysteine_candidates():
+    """Top-100 candidates must be single molecules, not disulfide isomer mixtures.
+
+    Two or more cysteines in a linear, unmodified, free-terminus peptide with no
+    controlled oxidation step gives an undefined mixture; an odd count leaves a
+    free thiol. Either way the assay result is uninterpretable.
+    """
+    from amp_challenge_2027.compliance import ReferenceIndex
+    from amp_challenge_2027.generate import select_top
+
+    rng = np.random.default_rng(11)
+    clean = ["".join(rng.choice(list("AGVILFPYMTSHNQWRKDE"), size=20)) for _ in range(60)]
+    # Cysteine-rich candidates given deliberately better scores.
+    rich = ["C" + "".join(rng.choice(list("AGVILFKR"), size=18)) + "C" for _ in range(60)]
+    sequences = list(dict.fromkeys(rich + clean))
+    scores = np.array([2.0 if s.count("C") >= 2 else 1.0 for s in sequences])
+
+    chosen = select_top(sequences, scores, ReferenceIndex([]), k=30, verbose=False)
+    assert len(chosen) == 30
+    assert all(s.count("C") == 0 for s in chosen), "cysteine-containing candidate selected"
+
+    # The intermediate policy is still available and excludes only multi-cysteine.
+    single = select_top(
+        sequences, scores, ReferenceIndex([]), k=30, max_cysteines=1, verbose=False
+    )
+    assert all(s.count("C") <= 1 for s in single)
+
+    # Disabling the gate lets the high-scoring cysteine-rich peptides back in.
+    ungated = select_top(
+        sequences, scores, ReferenceIndex([]), k=30, max_cysteines=None, verbose=False
+    )
+    assert any(s.count("C") >= 2 for s in ungated)

@@ -20,3 +20,7 @@ wheels/
 
 # Local scratch
 *.log
+
+# Resumable challenger experiments (data copies, embeddings, fitted models).
+/research_runs/
+/colab_bundle/

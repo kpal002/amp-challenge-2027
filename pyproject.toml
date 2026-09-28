@@ -36,6 +36,10 @@ train = [
     "biopython>=1.83",
     "pytest>=9.1.1",
 ]
+research = [
+    { include-group = "train" },
+    "transformers>=4.45,<5",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.21,<0.12.0"]

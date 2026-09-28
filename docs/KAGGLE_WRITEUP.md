@@ -46,7 +46,19 @@ metric families independently.
 
 ### Top-100 selection procedure
 
-Four filters are applied on top of the composite score.
+Five filters are applied on top of the composite score.
+
+0. **Synthesizability — no cysteine.** Submitted peptides are linear, unmodified
+   and free-terminus with no controlled oxidation step, so a candidate with two or
+   more cysteines is an undefined mixture of disulfide isomers and an odd count
+   leaves a free thiol. Before this filter our top-100 was 46% cysteine-containing
+   and 40% multi-cysteine, against 26.3% / 12.6% in our library and 26.4% / 13.3%
+   in the reference database: the potency model had learned cysteine as a positive
+   signal from GRAMPA's disulfide-bonded entries, whose activity depends on a
+   structure the rules forbid. About 10 of 25 randomly drawn peptides would have
+   been undefined mixtures. The gate costs 0.037 log10 units of predicted potency
+   — 5.6% of the model's clustered-split RMSE — and moved top-100 median net charge
+   to 3.99 against 4.07 for measured-potent AMPs.
 
 1. **Reference novelty.** No candidate exceeds 0.75 similarity to any reference
    AMP. The rule states 0.80; we apply a 0.05 margin because the template

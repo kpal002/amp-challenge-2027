@@ -62,6 +62,18 @@ not demonstrated selectivity. Treat both as priors, not as validated activity.
 
 Applied in order, inside `uv run generate`. No step involves human inspection.
 
+**Synthesizability gate (top-100).** Candidates containing any cysteine are
+excluded. Submitted peptides are linear, unmodified and free-terminus with no
+controlled oxidation step, so two or more cysteines give an undefined mixture of
+disulfide isomers and an odd count leaves a free thiol. Before this filter the
+top-100 was 46% cysteine-containing and 40% multi-cysteine, against 26.3% / 12.6%
+in the library and 26.4% / 13.3% in the reference database — the potency model
+learned cysteine as a signal from GRAMPA's disulfide-bonded entries, whose activity
+depends on a structure this submission may not have. The gate costs 0.037 log10
+units of predicted potency, 5.6% of the model's clustered-split RMSE. The library
+is deliberately **not** filtered, since its cysteine content correctly matches the
+reference distribution and filtering it would reduce realism.
+
 **Hard compliance gate (library and top-100).** Alphabet restricted to the 20
 standard residues; length 8–50; no duplicates; zero exact matches to the
 reference database. Length compliance is additionally structural: the sampler

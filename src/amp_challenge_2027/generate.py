@@ -143,6 +143,7 @@ def select_top(
     index: ReferenceIndex,
     k: int,
     in_envelope: np.ndarray | None = None,
+    max_cysteines: int | None = 0,
     strata_features: np.ndarray | None = None,
     strata_bins: int = 4,
     strata_pool: int = 12000,
@@ -158,6 +159,7 @@ def select_top(
       cluster of near-identical peptides would turn one design idea into a
       correlated bet. Enforcing mutual distance makes the drawn sample
       informative about the model rather than about a single lucky motif;
+    * synthesizability -- no cysteine at all. See `max_cysteines` below;
     * plausibility envelope -- ranking on predicted potency alone pushes
       selection into the upper tail of the cationic/amphipathic distribution,
       where the potency model extrapolates and peptides tend to be hemolytic.
@@ -181,10 +183,37 @@ def select_top(
     rejected_reference = 0
     rejected_internal = 0
     rejected_envelope = 0
+    rejected_cysteine = 0
 
     def admissible(i: int) -> bool:
         nonlocal rejected_envelope, rejected_reference, rejected_internal
+        nonlocal rejected_cysteine
         seq = sequences[i]
+        # Submitted peptides are linear, unmodified and free-terminus, and no
+        # controlled oxidation step exists. A peptide with two or more cysteines
+        # is therefore not one molecule but an undefined mixture of disulfide
+        # isomers, and an odd count leaves a free thiol that oxidises in the
+        # plate. Either way the assay measures something whose identity is not
+        # defined, so the result is uninterpretable whichever way it comes out.
+        #
+        # Allowing a single cysteine would remove the isomer problem but leave a
+        # free thiol that can oxidise to a disulfide-linked dimer in solution.
+        # Excluding cysteine outright costs 0.037 log10 of predicted potency
+        # against no gate (5.6% of the oracle's 0.656 RMSE, unmeasurable) and
+        # buys an unhedged claim: every submitted peptide is one defined
+        # molecule under the competition's own constraints.
+        #
+        # This is the same error the amidation filter already guards against on
+        # the training side: GRAMPA's cysteine-rich entries are potent *as
+        # folded, disulfide-bonded molecules*, and the potency model learned
+        # cysteine as a potency signal from them. Left unchecked it enriched the
+        # top-100 to 46% cysteine-containing and 40% multi-cysteine, against
+        # 26% and 13% in both the library and the reference database -- the
+        # ranker chasing a feature whose measured activity depends on a
+        # structure this submission is forbidden from having.
+        if max_cysteines is not None and seq.count("C") > max_cysteines:
+            rejected_cysteine += 1
+            return False
         if in_envelope is not None and not in_envelope[i]:
             rejected_envelope += 1
             return False
@@ -259,8 +288,9 @@ def select_top(
 
     if verbose:
         print(
-            f"  top-{k} selection: {rejected_envelope} rejected outside the potent "
-            f"envelope, {rejected_reference} for reference similarity, "
+            f"  top-{k} selection: {rejected_cysteine} rejected for cysteine count, "
+            f"{rejected_envelope} outside the potent envelope, "
+            f"{rejected_reference} for reference similarity, "
             f"{rejected_internal} for redundancy",
             flush=True,
         )
@@ -303,6 +333,12 @@ def main() -> None:
         type=int,
         default=4,
         help="Bins per axis for stratified top-k selection (1 disables stratification).",
+    )
+    parser.add_argument(
+        "--max-cysteines",
+        type=int,
+        default=0,
+        help="Maximum cysteines in a top-100 candidate (-1 disables the gate).",
     )
     parser.add_argument(
         "--strata-pool",
@@ -372,6 +408,7 @@ def main() -> None:
         index,
         args.top_k,
         in_envelope=components["in_envelope"],
+        max_cysteines=None if args.max_cysteines < 0 else args.max_cysteines,
         strata_features=strata_features,
         strata_bins=args.strata_bins,
         strata_pool=args.strata_pool,

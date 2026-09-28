@@ -1,5 +1,12 @@
 # AMP Challenge 2027 — submission
 
+Research extension: [challenger-guided retrospective experiment](docs/CHALLENGER_EXPERIMENT.md)
+and [resumable Colab notebook](notebooks/challenger_colab.ipynb). This evaluates
+prediction-error warnings on held-out peptide families; it does not change the
+submission pipeline or establish activity of newly generated peptides.
+See the [initial development results](docs/CHALLENGER_RESULTS.md) for measured
+comparisons against representation-matched controls and their limitations.
+
 A category-conditioned peptide language model with a rank-based candidate
 selection stage. Generates a 50,000-member antimicrobial peptide library and a
 ranked top-100 list per competition category.
@@ -126,7 +133,13 @@ Rank-normalising each term prevents any one from dominating through scale.
 The `therapeutic` category reweights toward selectivity (0.45) since it is scored
 on the safety window; `mdr` weights potency higher (0.60).
 
-Three filters apply on top of the score:
+Four filters apply on top of the score:
+
+- **Synthesizability** — no cysteine. Submitted peptides are linear, unmodified
+  and free-terminus, with no controlled oxidation step, so a candidate with two or
+  more cysteines is not one molecule but an undefined mixture of disulfide
+  isomers, and an odd count leaves a free thiol that oxidises in the plate. Either
+  way the assay measures something whose identity is not defined.
 
 - **Reference novelty** — required. No top-100 candidate exceeds 0.80 similarity
   to any reference AMP. We enforce 0.75, because the template implements the rule
@@ -144,6 +157,41 @@ Three filters apply on top of the score:
   hydrophobic moment), drawing from the top 4,000 candidates by score. Bin edges
   are library-wide: deriving them from the selection pool instead was tried and
   measured worse on four of five categories.
+
+### Why cysteine is excluded
+
+This was found late and is the most consequential correctness fix in the
+repository. The generated library is 26.3% cysteine-containing and 12.6%
+multi-cysteine, closely matching the reference database (26.4% / 13.3%). The
+*selected* top-100, before this filter, was **46% and 40%** — one candidate carried
+seven cysteines, and twenty carried an odd count. Roughly 10 of the 25 peptides
+drawn for assay would have been undefined mixtures.
+
+The selection stage caused it, not the generator. Cysteine-rich AMPs are among the
+most potent entries in GRAMPA, but they are potent *as folded, disulfide-bonded
+molecules*; the potency model learned cysteine as a positive signal from them and
+ranked accordingly. This is the same error the amidation filter already guards
+against on the training side — 43% of GRAMPA is C-terminally amidated and was
+dropped for exactly this reason — applied to a different post-translational
+structure that the submission rules equally forbid.
+
+| Gate | library eligible | top-100 pred. MIC | multi-Cys | free thiol |
+|---|---|---|---|---|
+| none | 50,000 | 0.762 | 40 | 20 |
+| Cys ≤ 1 | 43,682 | 0.778 | 0 | 17 |
+| **Cys = 0 (shipped)** | 36,836 | **0.799** | **0** | **0** |
+
+The shipped gate costs 0.037 log₁₀ units of predicted potency against no gate,
+which is 5.6% of the potency model's own clustered-split RMSE of 0.656 — not a
+measurable difference by the instrument that measures it. It also moved the
+top-100 median net charge to 3.99 against 4.07 for measured-potent AMPs, i.e.
+slightly *closer* to the reference distribution. `Cys ≤ 1` would have removed the
+isomer problem while leaving 17 free-thiol peptides; excluding cysteine outright
+costs 0.021 more and buys an unhedged claim.
+
+A 14–28 residue window was also considered and rejected: it costs four times as
+much predicted potency and its lower bound has no synthesis justification, since
+short peptides are the easier ones to make.
 
 ### Why the envelope matters
 
@@ -243,7 +291,7 @@ that the library lands on the AMP side of every axis independently.
 | Cohort | pred. log₁₀ MIC | net charge | hydrophobic moment | length |
 |---|---|---|---|---|
 | generated library | 1.233 | 2.90 | 0.504 | 18 |
-| generated top-100 | 0.762 | 3.60 | 0.492 | 17 |
+| generated top-100 | 0.784 | 3.99 | 0.584 | 18 |
 | reference AMPs | 1.150 | 2.99 | 0.560 | 15 |
 | potent refs (MIC ≤ 10 µM) | 0.850 | 4.07 | 0.617 | 22 |
 | weak refs (MIC ≥ 100 µM) | 1.674 | 2.80 | 0.495 | 15 |
@@ -294,14 +342,15 @@ aggregation score may weight them differently than we have assumed.
 | Unique sequences | 50,000 / 50,000 |
 | Length | min 8, median 18, max 50 |
 | Mean pairwise similarity (n=300 subsample) | 0.250 |
+| Cysteine-containing peptides in top-100 | 0 / 100 |
 | Library novelty vs reference | median 0.667, p95 0.872, max 0.947 |
 | Top-100 novelty vs reference | **max 0.750** |
-| Top-100 net charge | median 3.60, IQR 3.06 |
+| Top-100 net charge | median 3.99, IQR 2.97 |
 
 
 Two caveats stated plainly.
 
-The top-100's *predicted* MIC (0.762) is better than the library median (1.233)
+The top-100's *predicted* MIC (0.784) is better than the library median (1.233)
 but no better than real measured-potent AMPs (0.850), and candidates were selected
 on that same prediction. With a clustered-split RMSE of 0.656 log₁₀ units, none of
 these gaps is outside model noise. This is not evidence of superiority to known
