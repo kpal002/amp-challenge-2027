@@ -142,6 +142,7 @@ def select_top(
     scores: np.ndarray,
     index: ReferenceIndex,
     k: int,
+    assayed_k: int | None = None,
     in_envelope: np.ndarray | None = None,
     max_cysteines: int | None = 0,
     strata_features: np.ndarray | None = None,
@@ -165,6 +166,16 @@ def select_top(
       where the potency model extrapolates and peptides tend to be hemolytic.
       Candidates must lie within the central range of measured-potent AMPs.
 
+    `assayed_k` is the operative set size. The competition FAQ states that the 25
+    tested peptides are drawn at random "from the top 50 of this list", not from
+    all 100, so only the first `assayed_k` ranks can ever reach the wet lab and
+    ranks beyond it serve as replacements if a candidate is invalidated by the
+    identity rule. Diversity is therefore optimised over the first `assayed_k`
+    entries; optimising it over all `k` puts roughly half the benefit in ranks
+    that are never assayed (measured: the top 50 of a 100-optimised list covered
+    29 of 64 strata with net-charge IQR 1.76, against 49/64 and 2.97 for the full
+    100).
+
     Selection is additionally **stratified** over physicochemical space when
     `strata` is supplied. Score-greedy selection inside the envelope still
     collapsed into one narrow corner -- measured with seqme, the top-100 reached
@@ -177,6 +188,8 @@ def select_top(
     # Tie-break on the sequence string so the ordering is total and therefore
     # identical across runs, regardless of how ties fall out of the scorer.
     order = sorted(range(len(sequences)), key=lambda i: (-scores[i], sequences[i]))
+
+    primary = k if assayed_k is None else min(assayed_k, k)
 
     chosen: list[str] = []
     chosen_idx: list[int] = []
@@ -266,10 +279,19 @@ def select_top(
             if not progressed:
                 break
 
+        # Both blocks stay stratified. Round-robin picks the best candidate from
+        # each stratum before returning to any stratum, so the first `primary`
+        # picks are one-per-stratum and the next `k - primary` are the
+        # second-best per stratum -- each block spread, neither concentrated.
+        #
+        # Splitting head from tail by PICK ORDER rather than by score is what
+        # makes this work. Sorting all k by score put the highest-scoring
+        # candidates in the assayed prefix, and those are the concentrated ones:
+        # measured, that gave the top 50 only 29 of 64 strata at net-charge IQR
+        # 1.76. Filling the reserve by score instead left it at 2 of 64 strata,
+        # which costs the Phase-1 screening of the top-100 list. Pick order gives
+        # 49/64 in the assayed prefix and keeps the reserve spread too.
         if len(chosen) < k:
-            # The stratified pool was exhausted. Fall back to score order over the
-            # rest of the library rather than failing: spread is a preference, but
-            # returning a full ranked list is a requirement.
             already = set(chosen_idx)
             for i in order:
                 if len(chosen) >= k:
@@ -281,8 +303,8 @@ def select_top(
                     chosen_idx.append(i)
             if verbose:
                 print(
-                    f"  stratified pool exhausted; topped up to {len(chosen)} "
-                    f"by score order",
+                    f"  stratified first {primary}; filled ranks "
+                    f"{primary + 1}-{len(chosen)} by score as replacements",
                     flush=True,
                 )
 
@@ -299,10 +321,12 @@ def select_top(
             f"only {len(chosen)} of {k} candidates passed the novelty and "
             f"diversity filters; generate a larger library"
         )
-    # Stratified round-robin selects in stratum order, not score order, but the
-    # submitted top list must be ranked best-first. Re-sort before returning.
-    chosen_idx.sort(key=lambda i: (-scores[i], sequences[i]))
-    return [sequences[i] for i in chosen_idx]
+    # The submitted list must be ranked best-first, but the assayed prefix must
+    # stay in the first `primary` ranks. Sort within each block, never across
+    # them -- see the pick-order note above.
+    head = sorted(chosen_idx[:primary], key=lambda i: (-scores[i], sequences[i]))
+    tail = sorted(chosen_idx[primary:], key=lambda i: (-scores[i], sequences[i]))
+    return [sequences[i] for i in head + tail]
 
 
 def main() -> None:
@@ -333,6 +357,12 @@ def main() -> None:
         type=int,
         default=4,
         help="Bins per axis for stratified top-k selection (1 disables stratification).",
+    )
+    parser.add_argument(
+        "--assayed-k",
+        type=int,
+        default=50,
+        help="Ranks eligible for assay (competition FAQ: 25 drawn from the top 50).",
     )
     parser.add_argument(
         "--max-cysteines",
@@ -407,6 +437,7 @@ def main() -> None:
         scores,
         index,
         args.top_k,
+        assayed_k=args.assayed_k,
         in_envelope=components["in_envelope"],
         max_cysteines=None if args.max_cysteines < 0 else args.max_cysteines,
         strata_features=strata_features,

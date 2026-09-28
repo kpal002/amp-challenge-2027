@@ -154,9 +154,41 @@ Four filters apply on top of the score:
   peptides with *measured* MIC ≤ 10 µM, across ten physicochemical descriptors.
 - **Stratified selection** — the list is built by taking the best candidate from
   each of 64 physicochemical strata in turn (quartiles over length, net charge and
-  hydrophobic moment), drawing from the top 4,000 candidates by score. Bin edges
+  hydrophobic moment), drawing from the top 12,000 candidates by score. Bin edges
   are library-wide: deriving them from the selection pool instead was tried and
   measured worse on four of five categories.
+
+### The operative set is the top 50, not the top 100
+
+The competition FAQ states that the 25 tested peptides are drawn at random **"from
+the top 50 of this list"** — not from all 100. (The bundled competition proposal
+says top-100; the live FAQ is authoritative.) Ranks 51–100 are never assayed and
+serve as replacements if a candidate is invalidated by the identity rule.
+
+That makes rank placement consequential, and getting it wrong is easy. Selecting
+100 stratified candidates and then sorting all 100 by score puts the
+highest-scoring candidates in the assayed prefix — and those are precisely the
+concentrated ones, because score correlates with the cationic/amphipathic corner.
+Measured on our own list, that left the top 50 covering only **29 of 64 strata** at
+net-charge IQR 1.76, with roughly half the diversity sitting in ranks that can
+never be tested.
+
+Filling the reserve by score instead swung it the other way: the reserve collapsed
+to 2 of 64 strata, which costs the Phase-1 screening, since that evaluates the
+**top-100** list.
+
+The fix is to split head from tail by round-robin **pick order** rather than by
+score. Round-robin takes the best candidate from every stratum before returning to
+any stratum, so the first 50 picks are one-per-stratum and the next 50 are the
+second-best per stratum — both blocks spread:
+
+| Block | strata covered | net charge IQR | pred. log₁₀ MIC |
+|---|---|---|---|
+| top 50 (assayed) | 49/64 | 3.00 | 0.777 |
+| ranks 51–100 (reserve) | 44/64 | 2.96 | 0.802 |
+| full 100 (Phase-1 scored) | 49/64 | 2.97 | 0.784 |
+
+The full-100 figures are unchanged by this, so nothing is given up on Phase 1.
 
 ### Why cysteine is excluded
 
@@ -385,6 +417,13 @@ envelope floor derived from measured-potent AMPs (net charge ≥ 0, cationic fra
 ≥ 0.053, pI ≥ 7.04) removes the low end, leaving candidates spanning ~4.2 charge
 units instead of ~7.1. Widening the spread would mean selecting outside the region
 where the potency model has evidence, which measured worse. Left as-is.
+
+**Peptides that fail synthesis or QC are simply lost.** The FAQ states that
+sequences which "fail synthesis, are insoluble, or do not pass identity and purity
+QC will not be retested". There is no replacement for a QC failure, only for an
+identity-rule violation. This is the strongest practical argument for the cysteine
+gate: multi-cysteine peptides are the most likely to fail an identity check, and
+before the gate roughly 10 of our 25 drawn peptides were undefined mixtures.
 
 **No hemolysis data is used anywhere.** The selectivity term is a published
 qualitative trend (cationicity favourable, bulk hydrophobicity and long

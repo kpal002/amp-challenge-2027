@@ -70,10 +70,16 @@ Five filters are applied on top of the composite score.
    net charge +12.0 against +4.1 for measured-potent AMPs — outside the oracle's
    training support and in the region where peptides are characteristically
    hemolytic.
-3. **Stratified selection.** Candidates are binned into 64 strata (quartiles over
-   length, net charge and hydrophobic moment, library-wide edges) and the best
-   admissible candidate from each is taken in turn from the top 12,000 by score,
-   then re-sorted into rank order. Measured with seqme, score-greedy selection
+3. **Stratified selection, optimised over the assayed prefix.** Candidates are
+   binned into 64 strata (quartiles over length, net charge and hydrophobic
+   moment, library-wide edges) and the best admissible candidate from each is
+   taken in turn from the top 12,000 by score. Because the FAQ states the 25
+   tested peptides are drawn from the **top 50**, head and tail are split by
+   round-robin pick order rather than by score, so the assayed prefix carries the
+   spread (49 of 64 strata, net-charge IQR 3.00) rather than the concentrated
+   high-scoring corner (29 of 64, IQR 1.76 if sorted by score across all 100).
+   The reserve block stays stratified too (44 of 64), so the top-100 figures that
+   Phase 1 screens are unchanged. Measured with seqme, score-greedy selection
    inside the envelope gave precision 0.97 with recall 0.17 — a homogeneous
    cluster. Since 25 of the 100 are drawn at random for assay, homogeneity makes
    that draw a correlated bet. Stratifying moved the top-100 to FBD 2.02, MMD

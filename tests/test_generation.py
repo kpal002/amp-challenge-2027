@@ -294,3 +294,53 @@ def test_cysteine_gate_excludes_multi_cysteine_candidates():
         sequences, scores, ReferenceIndex([]), k=30, max_cysteines=None, verbose=False
     )
     assert any(s.count("C") >= 2 for s in ungated)
+
+
+def test_assayed_prefix_holds_the_stratified_set():
+    """The first `assayed_k` ranks are the operative set and must carry the spread.
+
+    The competition draws its 25 tested peptides from the top 50, so diversity
+    optimised across all 100 leaves half the benefit in ranks that are never
+    assayed.
+    """
+    from amp_challenge_2027.compliance import ReferenceIndex
+    from amp_challenge_2027.generate import select_top, stratum_labels
+
+    rng = np.random.default_rng(5)
+    sequences = list(
+        dict.fromkeys(
+            "".join(rng.choice(list("AGVILFPYMTSHNQWRKDE"), size=int(rng.integers(10, 40))))
+            for _ in range(1200)
+        )
+    )
+    n = len(sequences)
+    lengths = np.array([len(s) for s in sequences], dtype=float)
+    # Score correlates with length, so score-greedy selection concentrates.
+    scores = lengths / lengths.max() + 0.01 * rng.random(n)
+    features = np.column_stack([lengths, rng.random(n), rng.random(n)])
+    strata = stratum_labels(features, n_bins=3)
+    lookup = {s: i for i, s in enumerate(sequences)}
+    index = ReferenceIndex([])
+
+    chosen = select_top(
+        sequences, scores, index, k=100, assayed_k=50,
+        strata_features=features, strata_bins=3, strata_pool=600, verbose=False,
+    )
+    assert len(chosen) == 100
+    assert len(set(chosen)) == 100
+
+    head_strata = {int(strata[lookup[s]]) for s in chosen[:50]}
+    # Same budget spread over all 100 instead: the assayed prefix covers less.
+    spread_over_100 = select_top(
+        sequences, scores, index, k=100, assayed_k=None,
+        strata_features=features, strata_bins=3, strata_pool=600, verbose=False,
+    )
+    baseline_head = {int(strata[lookup[s]]) for s in spread_over_100[:50]}
+    assert len(head_strata) >= len(baseline_head), (
+        f"assayed prefix covers {len(head_strata)} strata vs {len(baseline_head)} baseline"
+    )
+
+    # Each block must still be internally ranked best-first.
+    sc = [scores[lookup[s]] for s in chosen]
+    assert all(a >= b - 1e-12 for a, b in zip(sc[:50], sc[1:50]))
+    assert all(a >= b - 1e-12 for a, b in zip(sc[50:], sc[51:]))
